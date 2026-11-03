@@ -66,5 +66,5 @@ runs:
         echo "**Kernel Version:** ${{ inputs.android_version }} + ${{ inputs.kernel_version }} (sublevel ${{ inputs.sublevel }})" >> "$SUMMARY_FILE"
         echo "" >> "$SUMMARY_FILE"
         echo "### Fix Status" >> "$SUMMARY_FILE"
-        echo "- Android 16 (6.12.30) compatibility validated" >> "$SUMMARY_FILE"
+        echo "- Android 16 GKI 6.12.x compatibility target" >> "$SUMMARY_FILE"
         echo "- USB Gadget ConfigFS multi-gadget support patched" >> "$SUMMARY_FILE"

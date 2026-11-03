@@ -2,6 +2,10 @@
   "sukisu_ultra": {
     "main": "d6437210be1230bc96ca666ed219e023f18c4a8b"
   },
+  "kernel_su_next": {
+    "v3.4.2": "4c706b5938665866ebe16944a481a7b91e3396af",
+    "dev": "a6c81fa4a8b7341d0bc5c3e4507531459df871ae"
+  },
   "susfs": {
     "gki-android16-6.12": "3ff9fd3fac5bb01b71b2cfe96c612d469710fb74"
   },

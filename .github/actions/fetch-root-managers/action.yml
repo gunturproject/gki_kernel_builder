@@ -1,5 +1,5 @@
 name: 'Fetch Root Manager APKs'
-description: 'Download the latest SukiSU-Ultra root manager APK'
+description: 'Download the matching official root manager APK for SukiSU-Ultra or KernelSU-Next'
 inputs:
   flavor:
     description: 'Root flavor (default: SukiSU-Ultra)'
@@ -23,66 +23,56 @@ runs:
         set -euo pipefail
 
         OUT_DIR="${{ inputs.output_dir }}"
-        GH_TOKEN="${{ inputs.token }}"
-
+        export GH_TOKEN="${{ inputs.token }}"
+        FLAVOR="${{ inputs.flavor }}"
         mkdir -p "$OUT_DIR" /tmp/manager-dl
         cd /tmp/manager-dl
 
-        fetch_latest_release_apks() {
-          local owner="$1"
-          local repo="$2"
-          local flavor_tag="$3"
+        case "$FLAVOR" in
+          SukiSU-Ultra)
+            OWNER="SukiSU-Ultra"
+            REPO="SukiSU-Ultra"
+            ;;
+          KernelSU-Next)
+            OWNER="KernelSU-Next"
+            REPO="KernelSU-Next"
+            ;;
+          *)
+            echo "::error::Unsupported root manager flavor: $FLAVOR" >&2
+            exit 1
+            ;;
+        esac
 
-          echo "[+] Fetching latest release APKs for ${owner}/${repo}..."
-          local urls=""
+        echo "[+] Fetching latest release assets for ${OWNER}/${REPO}..."
+        RELEASE_JSON=""
+        if command -v gh >/dev/null 2>&1; then
+          RELEASE_JSON="$(gh api "repos/${OWNER}/${REPO}/releases/latest" 2>/dev/null || true)"
+        fi
+        if [ -z "$RELEASE_JSON" ]; then
+          RELEASE_JSON="$(curl -fsSL --retry 5 --retry-delay 3 \
+            -H 'Accept: application/vnd.github+json' -H 'User-Agent: gki-kernel-builder' \
+            "https://api.github.com/repos/${OWNER}/${REPO}/releases/latest")"
+        fi
 
-          # 1. Try using GitHub CLI (gh api) with authentication for the latest release (index .[0])
-          if command -v gh >/dev/null 2>&1; then
-            urls=$(gh api repos/${owner}/${repo}/releases --jq ".[0].assets[] | select(.name | endswith(\".apk\") and (contains(\"debug\") | not)) | .browser_download_url" 2>/dev/null || true)
-            # If no non-debug apk was found, fallback to any apk from latest release
-            if [ -z "$urls" ]; then
-              urls=$(gh api repos/${owner}/${repo}/releases --jq ".[0].assets[] | select(.name | endswith(\".apk\")) | .browser_download_url" 2>/dev/null || true)
-            fi
-          fi
+        if [ "$FLAVOR" = "KernelSU-Next" ]; then
+          URLS="$(jq -r '.assets[]? | select((.name | startswith("KernelSU_Next_")) and (.name | endswith(".apk")) and ((.name | ascii_downcase | contains("spoofed")) | not) and ((.name | ascii_downcase | contains("debug")) | not)) | .browser_download_url' <<< "$RELEASE_JSON")"
+        else
+          URLS="$(jq -r '.assets[]? | select((.name | ascii_downcase | endswith(".apk")) and ((.name | ascii_downcase | contains("debug")) | not)) | .browser_download_url' <<< "$RELEASE_JSON")"
+        fi
 
-          # 2. Fallback to authenticated curl for the single latest release if gh returned empty
-          if [ -z "$urls" ]; then
-            local auth_header=()
-            if [ -n "$GH_TOKEN" ]; then
-              auth_header=(-H "Authorization: Bearer $GH_TOKEN")
-            fi
-            auth_header+=(-H "Accept: application/vnd.github+json" -H "User-Agent: curl/8.0")
-            local rel_json
-            rel_json=$(curl -fsSL --retry 5 --retry-delay 3 "${auth_header[@]}" \
-              "https://api.github.com/repos/${owner}/${repo}/releases/latest" 2>/dev/null || true)
-            if [ -z "$rel_json" ] || ! echo "$rel_json" | grep -q '"browser_download_url"'; then
-              rel_json=$(curl -fsSL --retry 5 --retry-delay 3 "${auth_header[@]}" \
-                "https://api.github.com/repos/${owner}/${repo}/releases" 2>/dev/null | jq '.[0]' 2>/dev/null || true)
-            fi
-            if [ -n "$rel_json" ]; then
-              urls=$(echo "$rel_json" | grep -o '"browser_download_url": *"[^"]*\.apk"' | sed -e 's/"browser_download_url": *"//' -e 's/"$//' | grep -v -i "debug" || true)
-              if [ -z "$urls" ]; then
-                urls=$(echo "$rel_json" | grep -o '"browser_download_url": *"[^"]*\.apk"' | sed -e 's/"browser_download_url": *"//' -e 's/"$//' || true)
-              fi
-            fi
-          fi
+        if [ -z "$URLS" ]; then
+          echo "::error::No eligible Manager APK found in latest ${OWNER}/${REPO} release for ${FLAVOR}." >&2
+          exit 1
+        fi
 
-          if [ -z "$urls" ]; then
-            echo "[-] Warning: Could not find APK release assets for ${owner}/${repo}"
-            return 0
-          fi
-
-          for url in $urls; do
-            local fname="${url##*/}"
-            echo "[+] Downloading latest release APK: $fname from $url"
-            curl -fsSL --retry 5 --retry-delay 3 -o "/tmp/manager-dl/${fname}" "$url"
-            cp -f "/tmp/manager-dl/${fname}" "${OUT_DIR}/${fname}"
-            echo "[✓] Saved ${OUT_DIR}/${fname}"
-          done
-        }
-
-        # Fetch SukiSU-Ultra Manager APK
-        fetch_latest_release_apks "SukiSU-Ultra" "SukiSU-Ultra" "sukisu-ultra"
+        while IFS= read -r URL; do
+          [ -z "$URL" ] && continue
+          FILENAME="${URL##*/}"
+          echo "[+] Downloading official Manager APK: $FILENAME"
+          curl -fL --retry 5 --retry-delay 3 --retry-all-errors -o "/tmp/manager-dl/$FILENAME" "$URL"
+          cp -f "/tmp/manager-dl/$FILENAME" "$OUT_DIR/$FILENAME"
+          echo "[+] Saved $OUT_DIR/$FILENAME"
+        done <<< "$URLS"
 
         rm -rf /tmp/manager-dl
 
@@ -90,5 +80,5 @@ runs:
       shell: bash
       run: |
         echo "::group::Fetched Manager APKs"
-        find "${{ inputs.output_dir }}" -maxdepth 2 -type f -name "*.apk" -ls 2>/dev/null || echo "No APK files found"
+        find "${{ inputs.output_dir }}" -maxdepth 2 -type f -name '*.apk' -ls
         echo "::endgroup::"

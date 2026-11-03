@@ -1,5 +1,5 @@
-name: Setup Root Implementation (SukiSU-Ultra)
-description: Download and configure SukiSU-Ultra root implementation with version tracking
+name: Setup Root Implementation
+description: Download and configure SukiSU-Ultra or KernelSU-Next with version tracking
 inputs:
   flavor:
     description: 'Root flavor (default: SukiSU-Ultra)'
@@ -17,7 +17,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Download SukiSU-Ultra Root Implementation
+    - name: Download Selected Root Implementation
       shell: bash
       working-directory: ${{ github.workspace }}/kernel
       run: |
@@ -34,12 +34,30 @@ runs:
           return 1
         }
 
-        FLAVOR="ultra"
-        REPO="https://github.com/SukiSU-Ultra/SukiSU-Ultra.git"
-        SETUP_URL="https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh"
-        DEFAULT_REF="main"
-        DIR_NAME="SukiSU-Ultra"
-        MANAGER_NAME="SukiSU-Ultra Manager"
+        case "${{ inputs.flavor }}" in
+          SukiSU-Ultra)
+            FLAVOR="ultra"
+            ROOT_IMPL="ultra"
+            REPO="https://github.com/SukiSU-Ultra/SukiSU-Ultra.git"
+            SETUP_URL="https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh"
+            DEFAULT_REF="main"
+            DIR_NAME="SukiSU-Ultra"
+            MANAGER_NAME="SukiSU-Ultra Manager"
+            ;;
+          KernelSU-Next)
+            FLAVOR="kernelsu-next"
+            ROOT_IMPL="kernelsu-next"
+            REPO="https://github.com/KernelSU-Next/KernelSU-Next.git"
+            SETUP_URL="https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/v3.4.2/kernel/setup.sh"
+            DEFAULT_REF="v3.4.2"
+            DIR_NAME="KernelSU-Next"
+            MANAGER_NAME="KernelSU-Next Manager"
+            ;;
+          *)
+            echo "ERROR: Unsupported root flavor: ${{ inputs.flavor }}" >&2
+            exit 1
+            ;;
+        esac
 
         KSU_INPUT="${{ inputs.ksu_branch }}"
         if [ -z "$KSU_INPUT" ]; then
@@ -47,7 +65,7 @@ runs:
         fi
         PINNED_COMMIT="${{ inputs.commit }}"
 
-        echo "Root implementation: SukiSU-Ultra ($DIR_NAME)"
+        echo "Root implementation: ${{ inputs.flavor }} ($DIR_NAME)"
         echo "Target ref: $KSU_INPUT"
         if [ -n "$PINNED_COMMIT" ]; then
           echo "Target pinned commit: $PINNED_COMMIT"
@@ -139,7 +157,7 @@ runs:
           cd "${{ github.workspace }}/kernel"
         fi
 
-        echo "ROOT_IMPLEMENTATION=ultra" >> "$GITHUB_ENV"
+        echo "ROOT_IMPLEMENTATION=$ROOT_IMPL" >> "$GITHUB_ENV"
         echo "ROOT_MANAGER=$MANAGER_NAME" >> "$GITHUB_ENV"
 
     - name: Extract KSU Version Info
@@ -147,7 +165,7 @@ runs:
       shell: bash
       working-directory: ${{ github.workspace }}/kernel
       run: |
-        for candidate in SukiSU-Ultra KernelSU common/drivers/kernelsu drivers/kernelsu; do
+        for candidate in SukiSU-Ultra KernelSU-Next KernelSU common/drivers/kernelsu drivers/kernelsu; do
           if [ -d "$candidate/.git" ] || [ -f "$candidate/.git" ]; then
             cd "$candidate"
             BASE_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | sed 's:-.*::' || echo "main")
@@ -166,6 +184,7 @@ runs:
         done
 
     - name: 'Fix KernelSU Static Patch'
+      if: ${{ inputs.flavor == 'SukiSU-Ultra' }}
       shell: bash
       working-directory: ${{ github.workspace }}/kernel
       run: |
@@ -185,3 +204,5 @@ runs:
       with:
         config_list: |
           CONFIG_KSU=y
+          CONFIG_KPROBES=y
+          CONFIG_EXT4_FS=y

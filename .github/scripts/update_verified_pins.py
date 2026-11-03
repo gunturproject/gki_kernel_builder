@@ -20,6 +20,7 @@ PINS = [
     ("nomount", "dev", "NOMOUNT_SHA", "APPROVE_NOMOUNT"),
     ("susfs", "gki-android16-6.12", "SUSFS_SHA", "APPROVE_SUSFS"),
     ("sukisu_ultra", "main", "SUKISU_ULTRA_SHA", "APPROVE_SUKISU_ULTRA"),
+    ("kernel_su_next", "dev", "KERNELSU_NEXT_DEV_SHA", "APPROVE_KERNELSU_NEXT_DEV"),
 ]
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -86,7 +87,7 @@ def main():
         with open(COMMITS_JSON, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
             fh.write("\n")
-        print(f"  commits.json updated successfully.")
+        print("  commits.json updated successfully.")
     else:
         print("  no pin changes to promote.")
 

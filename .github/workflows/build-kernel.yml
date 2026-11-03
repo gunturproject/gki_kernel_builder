@@ -23,8 +23,24 @@ on:
           - latest
           - update
         default: verified
+      kernel_target:
+        description: "Android 16 GKI kernel source version"
+        type: choice
+        options:
+          - 6.12.38
+          - 6.12.30
+        default: 6.12.38
+        required: true
+      root_flavor:
+        description: "Kernel root implementation and matching manager"
+        type: choice
+        options:
+          - SukiSU-Ultra
+          - KernelSU-Next
+        default: SukiSU-Ultra
+        required: true
       ksu_branch:
-        description: "Custom Branch / Tag for SukiSU-Ultra (empty = default)"
+        description: "Custom branch/tag/commit for the selected root implementation (empty = default)"
         type: string
         required: false
         default: ""
@@ -86,6 +102,8 @@ jobs:
       susfs_commit: ${{ steps.resolve.outputs.susfs_commit }}
       root_matrix: ${{ steps.resolve.outputs.root_matrix }}
       ultra_commit: ${{ steps.resolve.outputs.ultra_commit }}
+      next_commit: ${{ steps.resolve.outputs.next_commit }}
+      next_dev_commit: ${{ steps.resolve.outputs.next_dev_commit }}
     steps:
       - uses: actions/checkout@v7
 
@@ -126,6 +144,8 @@ jobs:
           PIN_NOMOUNT=$(jq -r '.nomount.dev // empty' "$COMMITS_FILE" 2>/dev/null || echo "09257d7bee031f35124ed7a39e6094a4395d5746")
           PIN_SUSFS=$(jq -r '."susfs"."gki-android16-6.12" // empty' "$COMMITS_FILE" 2>/dev/null || echo "fb58aef70a9c2aca8f0f85fba14017af94c4e789")
           PIN_ULTRA=$(jq -r '."sukisu_ultra"."main" // empty' "$COMMITS_FILE" 2>/dev/null || echo "9fbe8fe8ca90c62c259c5894bf96d02ac31209b9")
+          PIN_NEXT_STABLE=$(jq -r '."kernel_su_next"."v3.4.2" // empty' "$COMMITS_FILE")
+          PIN_NEXT_DEV=$(jq -r '."kernel_su_next"."dev" // empty' "$COMMITS_FILE")
 
           pick() {
             local pinned="$1" repo="$2" ref="$3"
@@ -138,19 +158,109 @@ jobs:
 
           echo "Resolving dependencies..."
           emit nomount_commit "$(pick "$PIN_NOMOUNT" https://github.com/maxsteeel/nomount.git refs/heads/dev)"
-          emit susfs_commit "$(pick "$PIN_SUSFS" https://gitlab.com/simonpunk/susfs4ksu.git refs/heads/gki-android16-6.12)"
-          emit ultra_commit "$(pick "$PIN_ULTRA" https://github.com/SukiSU-Ultra/SukiSU-Ultra.git refs/heads/main)"
-
-          ULTRA_SHA="$(pick "$PIN_ULTRA" https://github.com/SukiSU-Ultra/SukiSU-Ultra.git refs/heads/main)"
+          if [ "${{ inputs.root_flavor }}" = "SukiSU-Ultra" ]; then
+            emit susfs_commit "$(pick "$PIN_SUSFS" https://gitlab.com/simonpunk/susfs4ksu.git refs/heads/gki-android16-6.12)"
+          else
+            echo "susfs_commit=" >> "$GITHUB_OUTPUT"
+          fi
 
           mk_entry() {
-            printf '{"flavor":"%s","ref":"%s","commit":"%s"}' "$1" "$2" "$3"
+            jq -cn --arg flavor "$1" --arg ref "$2" --arg commit "$3" '{flavor:$flavor,ref:$ref,commit:$commit}'
           }
 
+          ROOT_FLAVOR="${{ inputs.root_flavor }}"
           CUSTOM_REF="${{ inputs.ksu_branch }}"
-          REF="${CUSTOM_REF:-main}"
-          ROOT_MATRIX="[$(mk_entry SukiSU-Ultra "$REF" "$ULTRA_SHA")]"
+          case "$ROOT_FLAVOR" in
+            SukiSU-Ultra)
+              ROOT_REPO="https://github.com/SukiSU-Ultra/SukiSU-Ultra.git"
+              DEFAULT_REF="main"
+              DEFAULT_REMOTE_REF="refs/heads/main"
+              ;;
+            KernelSU-Next)
+              ROOT_REPO="https://github.com/KernelSU-Next/KernelSU-Next.git"
+              if [ "$COMMIT_MODE" = "verified" ]; then
+                DEFAULT_REF="v3.4.2"
+                DEFAULT_REMOTE_REF="refs/tags/v3.4.2"
+              else
+                DEFAULT_REF="dev"
+                DEFAULT_REMOTE_REF="refs/heads/dev"
+              fi
+              ;;
+            *)
+              echo "Unsupported root flavor: $ROOT_FLAVOR" >&2
+              exit 1
+              ;;
+          esac
 
+          ROOT_PIN=""
+          ROOT_SHA=""
+          if [ -n "$CUSTOM_REF" ]; then
+            if [[ "$CUSTOM_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              ROOT_REF="$CUSTOM_REF"
+              ROOT_SHA="${CUSTOM_REF,,}"
+            else
+              case "$CUSTOM_REF" in
+                refs/heads/*)
+                  ROOT_REF="${CUSTOM_REF#refs/heads/}"
+                  ROOT_REMOTE_REF="$CUSTOM_REF"
+                  ;;
+                refs/tags/*)
+                  ROOT_REF="${CUSTOM_REF#refs/tags/}"
+                  ROOT_REMOTE_REF="$CUSTOM_REF"
+                  ;;
+                *)
+                  ROOT_REF="$CUSTOM_REF"
+                  if git ls-remote "$ROOT_REPO" "refs/heads/$ROOT_REF" | grep -q .; then
+                    ROOT_REMOTE_REF="refs/heads/$ROOT_REF"
+                  elif git ls-remote "$ROOT_REPO" "refs/tags/$ROOT_REF" | grep -q .; then
+                    ROOT_REMOTE_REF="refs/tags/$ROOT_REF"
+                  else
+                    echo "Custom root ref not found: $CUSTOM_REF" >&2
+                    exit 1
+                  fi
+                  ;;
+              esac
+              if [ "$ROOT_FLAVOR" = "SukiSU-Ultra" ]; then
+                ROOT_PIN=$(jq -r --arg ref "$ROOT_REF" '."sukisu_ultra"[$ref] // empty' "$COMMITS_FILE")
+              else
+                ROOT_PIN=$(jq -r --arg ref "$ROOT_REF" '."kernel_su_next"[$ref] // empty' "$COMMITS_FILE")
+              fi
+              ROOT_SHA="$(pick "$ROOT_PIN" "$ROOT_REPO" "$ROOT_REMOTE_REF")"
+            fi
+          else
+            ROOT_REF="$DEFAULT_REF"
+            ROOT_REMOTE_REF="$DEFAULT_REMOTE_REF"
+            if [ "$ROOT_FLAVOR" = "SukiSU-Ultra" ]; then
+              ROOT_PIN="$PIN_ULTRA"
+            elif [ "$ROOT_REF" = "v3.4.2" ]; then
+              ROOT_PIN="$PIN_NEXT_STABLE"
+            else
+              ROOT_PIN="$PIN_NEXT_DEV"
+            fi
+            ROOT_SHA="$(pick "$ROOT_PIN" "$ROOT_REPO" "$ROOT_REMOTE_REF")"
+          fi
+
+          ULTRA_SHA=""
+          NEXT_SHA=""
+          NEXT_DEV_SHA=""
+          if [ "$ROOT_FLAVOR" = "SukiSU-Ultra" ]; then
+            ULTRA_SHA="$ROOT_SHA"
+          else
+            NEXT_SHA="$ROOT_SHA"
+            if [ "$COMMIT_MODE" = "update" ] && [ "$ROOT_REF" = "dev" ] && [ -z "$CUSTOM_REF" ]; then
+              NEXT_DEV_SHA="$ROOT_SHA"
+            fi
+          fi
+
+          if ! [[ "$ROOT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Resolved root commit is not a full 40-character SHA: $ROOT_SHA" >&2
+            exit 1
+          fi
+
+          ROOT_MATRIX="[$(mk_entry "$ROOT_FLAVOR" "$ROOT_REF" "$ROOT_SHA")]"
+          echo "ultra_commit=$ULTRA_SHA" >> "$GITHUB_OUTPUT"
+          echo "next_commit=$NEXT_SHA" >> "$GITHUB_OUTPUT"
+          echo "next_dev_commit=$NEXT_DEV_SHA" >> "$GITHUB_OUTPUT"
           echo "root_matrix=$ROOT_MATRIX" >> "$GITHUB_OUTPUT"
           echo "Generated Root Matrix: $ROOT_MATRIX"
 
@@ -190,8 +300,8 @@ jobs:
       VERSION: "android16-6.12"
       ANDROID_VERSION: "android16"
       KERNEL_VERSION: "6.12"
-      SUBLEVEL: "30"
-      OS_PATCH_LEVEL: "2025-07"
+      SUBLEVEL: ${{ inputs.kernel_target == '6.12.38' && '38' || '30' }}
+      OS_PATCH_LEVEL: ${{ inputs.kernel_target == '6.12.38' && '2025-09' || '2025-07' }}
       VARIANT: "Normal"
 
     steps:
@@ -210,7 +320,7 @@ jobs:
         uses: ./.github/actions/setup-build-environment
         with:
           version: "android16-6.12"
-          sublevel: "30"
+          sublevel: ${{ env.SUBLEVEL }}
         env:
           BOOT_SIGN_KEY: ${{ secrets.BOOT_SIGN_KEY }}
 
@@ -220,7 +330,9 @@ jobs:
           version: "android16-6.12"
           android_version: "android16"
           kernel_version: "6.12"
-          os_patch_level: "2025-07"
+          os_patch_level: ${{ env.OS_PATCH_LEVEL }}
+          common_revision: ${{ inputs.kernel_target == '6.12.38' && '4ef93a700ec424fe0d4f7d133e7ba50e4dbf0e36' || '' }}
+          common_upstream: ${{ inputs.kernel_target == '6.12.38' && 'refs/tags/android16-6.12-2025-09_r39' || '' }}
 
       - name: Build FUSE-BPF Userspace Daemon
         if: ${{ inputs.use_bpf }}
@@ -234,9 +346,12 @@ jobs:
       - name: Set Build Timestamp from Kernel Commit
         shell: bash
         run: |
-          set -x
-          FIXED_BUILD_DATE="2025-07-05 04:20:00 UTC"
-          SOURCE_DATE_EPOCH=$(date -u -d "$FIXED_BUILD_DATE" +%s)
+          set -euo pipefail
+          SOURCE_DATE_EPOCH="$(git -C "${{ github.workspace }}/kernel/common" log -1 --format=%ct)"
+          if ! [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]; then
+            echo "Could not derive reproducible timestamp from kernel/common HEAD" >&2
+            exit 1
+          fi
           echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" >> $GITHUB_ENV
           KBUILD_TS=$(date -u -d @${SOURCE_DATE_EPOCH} '+%a %b %d %H:%M:%S UTC %Y')
           echo "KBUILD_BUILD_TIMESTAMP=${KBUILD_TS}" >> $GITHUB_ENV
@@ -251,9 +366,21 @@ jobs:
         with:
           android_version: "android16"
           kernel_version: "6.12"
-          sublevel: "30"
-          os_patch_level: "2025-07"
+          sublevel: ${{ env.SUBLEVEL }}
+          os_patch_level: ${{ env.OS_PATCH_LEVEL }}
           variant: "Normal"
+
+      - name: Verify Requested Kernel Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="${{ env.SUBLEVEL }}"
+          ACTUAL="${{ steps.extract.outputs.sublevel }}"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::Requested ${{ inputs.kernel_target }} but kernel/common Makefile reports 6.12.$ACTUAL" >&2
+            exit 1
+          fi
+          echo "Verified kernel source version: 6.12.$ACTUAL"
 
       - name: Download NoMount Metamodule Artifact
         if: ${{ inputs.use_nomount }}
@@ -270,7 +397,7 @@ jobs:
           android_version: "android16"
           kernel_version: "6.12"
           sublevel: ${{ steps.extract.outputs.sublevel }}
-          os_patch_level: "2025-07"
+          os_patch_level: ${{ env.OS_PATCH_LEVEL }}
 
       - name: Setup Root Implementation
         uses: ./.github/actions/kernelsu
@@ -280,17 +407,19 @@ jobs:
           commit: ${{ matrix.commit }}
 
       - name: SUSFS
+        if: ${{ matrix.flavor == 'SukiSU-Ultra' }}
         uses: ./.github/actions/susfs
         with:
           susfs_commit: ${{ needs.resolve-sources.outputs.susfs_commit }}
           version: "android16-6.12"
           android_version: "android16"
           kernel_version: "6.12"
-          os_patch_level: "2025-07"
+          os_patch_level: ${{ env.OS_PATCH_LEVEL }}
           sublevel: ${{ steps.extract.outputs.sublevel }}
           root_flavor: ${{ matrix.flavor }}
 
       - name: Fix selinux_hide static declarations & pointer-bool-conversion on 6.12
+        if: ${{ matrix.flavor == 'SukiSU-Ultra' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -486,9 +615,10 @@ jobs:
           # GKI Kernel Build Summary
 
           ## Status: __STATUS__
-          - **Kernel Version:** 6.12.30-android16
-          - **OS Patch Level:** 2025-07
+          - **Kernel Version:** ${{ inputs.kernel_target }}-android16
+          - **OS Patch Level:** ${{ env.OS_PATCH_LEVEL }}
           - **Root Flavor:** __ROOT_FLAVOR__
+          - **SUSFS Integration:** __SUSFS_STATUS__
           - **Vendor Bypass:** Baked In (Default)
           - **Commit Mode:** __COMMIT_MODE__
           - **Patch Rejects:** __REJ_STATUS__
@@ -508,6 +638,12 @@ jobs:
 
           sed -i "s/__STATUS__/${STATUS}/g" "$SUMMARY_FILE"
           sed -i "s/__ROOT_FLAVOR__/${{ matrix.flavor }}/g" "$SUMMARY_FILE"
+          if [ "${{ matrix.flavor }}" = "SukiSU-Ultra" ]; then
+            SUSFS_STATUS="in-tree SUSFS patch and root hooks enabled"
+          else
+            SUSFS_STATUS="not applied: SukiSU-specific in-tree patch is incompatible with KernelSU-Next upstream"
+          fi
+          sed -i "s/__SUSFS_STATUS__/${SUSFS_STATUS}/g" "$SUMMARY_FILE"
           sed -i "s/__COMMIT_MODE__/${{ inputs.commit_mode }}/g" "$SUMMARY_FILE"
           sed -i "s/__REJ_STATUS__/${REJ_DISPLAY}/g" "$SUMMARY_FILE"
           sed -i "s/__NOMOUNT_STATUS__/${{ inputs.use_nomount }}/g" "$SUMMARY_FILE"
@@ -647,9 +783,11 @@ jobs:
           NOMOUNT_SHA: ${{ needs.resolve-sources.outputs.nomount_commit }}
           SUSFS_SHA: ${{ needs.resolve-sources.outputs.susfs_commit }}
           SUKISU_ULTRA_SHA: ${{ needs.resolve-sources.outputs.ultra_commit }}
+          KERNELSU_NEXT_DEV_SHA: ${{ needs.resolve-sources.outputs.next_dev_commit }}
           APPROVE_NOMOUNT: ${{ inputs.use_nomount }}
-          APPROVE_SUSFS: 'true'
-          APPROVE_SUKISU_ULTRA: 'true'
+          APPROVE_SUSFS: ${{ inputs.root_flavor == 'SukiSU-Ultra' }}
+          APPROVE_SUKISU_ULTRA: ${{ inputs.root_flavor == 'SukiSU-Ultra' && inputs.ksu_branch == '' }}
+          APPROVE_KERNELSU_NEXT_DEV: ${{ inputs.root_flavor == 'KernelSU-Next' && inputs.commit_mode == 'update' }}
         run: |
           set -euo pipefail
           echo "Promoting verified pins on successful build..."
@@ -687,8 +825,16 @@ jobs:
           echo "Release assets prepared:"
           ls -la dist/
 
-          RELEASE_NAME="Release #${{ github.run_number }} (SukiSU-Ultra)"
+          RELEASE_NAME="Release #${{ github.run_number }} (${{ inputs.root_flavor }})"
           echo "RELEASE_NAME=${RELEASE_NAME}" >> "$GITHUB_ENV"
+          if [ "${{ inputs.root_flavor }}" = "SukiSU-Ultra" ]; then
+            STEALTH_INFO="SUSFS v2.3.0"
+          else
+            STEALTH_INFO="SukiSU-specific in-tree SUSFS patch not applied to KernelSU-Next"
+          fi
+          if [ "${{ inputs.use_nomount }}" = "true" ]; then
+            STEALTH_INFO="$STEALTH_INFO + NoMount VFS Metamodule"
+          fi
 
           # Generate Release Notes
           RELEASE_BODY_FILE="release_notes.md"
@@ -703,14 +849,14 @@ jobs:
             echo "" >> "$RELEASE_BODY_FILE"
           fi
 
-          echo "## ⚡ Android 16 GKI Kernel (\`6.12.30\`) — Release #${{ github.run_number }}" >> "$RELEASE_BODY_FILE"
+          echo "## ⚡ Android 16 GKI Kernel (\`${{ inputs.kernel_target }}\`) — Release #${{ github.run_number }}" >> "$RELEASE_BODY_FILE"
           echo "" >> "$RELEASE_BODY_FILE"
           echo "### 📦 Build & Release Information" >> "$RELEASE_BODY_FILE"
-          echo "- **Kernel Version:** \`6.12.30-android16\`" >> "$RELEASE_BODY_FILE"
-          echo "- **OS Patch Level:** \`2025-07\`" >> "$RELEASE_BODY_FILE"
-          echo "- **Root Implementation:** \`SukiSU-Ultra\`" >> "$RELEASE_BODY_FILE"
+          echo "- **Kernel Version:** \`${{ inputs.kernel_target }}-android16\`" >> "$RELEASE_BODY_FILE"
+          echo "- **OS Patch Level:** \`${{ inputs.kernel_target == '6.12.38' && '2025-09' || '2025-07' }}\`" >> "$RELEASE_BODY_FILE"
+          echo "- **Root Implementation:** \`${{ inputs.root_flavor }}\`" >> "$RELEASE_BODY_FILE"
           echo "- **Vendor Module Bypass:** Baked In (\`bad_version: return 1;\`)" >> "$RELEASE_BODY_FILE"
-          echo "- **Stealth Integration:** SUSFS v2.3.0 + NoMount VFS Metamodule" >> "$RELEASE_BODY_FILE"
+          echo "- **Stealth Integration:** ${STEALTH_INFO}" >> "$RELEASE_BODY_FILE"
           echo "- **NetHunter Driver Stack:** 75+ Wireless WiFi drivers (\`=m\`), BadUSB HID (\`/dev/hidg*\`), CAN-Bus & RTL-SDR" >> "$RELEASE_BODY_FILE"
           echo "" >> "$RELEASE_BODY_FILE"
           echo "### 📲 Flashing Instructions" >> "$RELEASE_BODY_FILE"
@@ -718,13 +864,17 @@ jobs:
           echo "2. Flash **\`*-AnyKernel3.zip\`** using the **[Kernel Flasher](https://github.com/fatalcoder524/KernelFlasher/releases)** app. *(Vendor module bypass is built-in)*" >> "$RELEASE_BODY_FILE"
           echo "3. Install the matching **Root Manager APK** (\`*.apk\`) included in the bundle." >> "$RELEASE_BODY_FILE"
           echo "4. Reboot your device." >> "$RELEASE_BODY_FILE"
-          echo "5. Flash **[susfs4ksu-module (by sidex15)](https://github.com/sidex15/susfs4ksu-module/releases)** in your Root Manager for kernel-level root hiding." >> "$RELEASE_BODY_FILE"
+          if [ "${{ inputs.root_flavor }}" = "SukiSU-Ultra" ]; then
+            echo "5. *(Optional)* Flash **[susfs4ksu-module (by sidex15)](https://github.com/sidex15/susfs4ksu-module/releases)** in your Root Manager for additional root hiding." >> "$RELEASE_BODY_FILE"
+          else
+            echo "5. The builder skips the SukiSU-specific in-tree SUSFS patch for KernelSU-Next because its hunks do not apply to that upstream source." >> "$RELEASE_BODY_FILE"
+          fi
           echo "6. *(Optional)* Flash **\`Nethunter-Wireless-Modules.zip\`** or **\`NoMount-*.zip\`** inside the Root Manager." >> "$RELEASE_BODY_FILE"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v6.12.30-android16-${{ github.run_number }}"
+          tag_name: "v${{ inputs.kernel_target }}-android16-${{ inputs.root_flavor }}-${{ github.run_number }}"
           name: ${{ env.RELEASE_NAME }}
           draft: ${{ inputs.release_type == 'Draft' }}
           prerelease: ${{ inputs.release_type == 'Pre-Release' }}

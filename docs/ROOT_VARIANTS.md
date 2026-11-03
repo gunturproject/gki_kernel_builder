@@ -1,26 +1,29 @@
-# GKI Root, Stealth, & NetHunter Variants (Android 16 - 6.12.30)
+# GKI Root, Stealth, & NetHunter Variants (Android 16 - 6.12.30 / 6.12.38)
 
-This document details the root implementations, stealth modules, coexistence strategies, and penetration testing integrations supported by **`gki_kernel_builder`** for the **Android 16 GKI (Kernel 6.12.30 / 2025-07)** target.
+This document details the root implementations, stealth modules, coexistence strategies, and penetration testing integrations supported by **`gki_kernel_builder`** for Android 16 GKI `6.12.30` (2025-07) and `6.12.38` (2025-09). The 6.12.38 build is pinned to the official Google `android16-6.12-2025-09_r39` kernel/common tag.
 
 ---
 
 ## 1. Supported Root Implementation
 
-The build system utilizes **SukiSU-Ultra** as the standard kernel-level root implementation:
+The build workflow lets users choose one kernel-level root implementation. The verified defaults are pinned to upstream commits/releases; `latest` and `update` modes use the configured upstream branch.
 
-| Root Implementation | Upstream Repository | Default Branch | Integration Mechanism |
+| Root Implementation | Upstream Repository | Verified Default | Integration Mechanism |
 | :--- | :--- | :--- | :--- |
-| **SukiSU-Ultra** | [SukiSU-Ultra/SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra) | `main` | Kernel-level root solution & KPM engine; native SUSFS compatibility. |
+| **SukiSU-Ultra** | [SukiSU-Ultra/SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra) | `main` | Kernel-level root solution and KPM engine; the builder applies its tested in-tree SUSFS integration. |
+| **KernelSU-Next** | [KernelSU-Next/KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next) | `v3.4.2` | Upstream KernelSU-Next kernel integration with its matching official Manager APK. |
+
+**KernelSU-Next SUSFS limitation:** the builder does not run the SukiSU-specific `simonpunk/susfs4ksu` in-tree patch for this flavor. A dry-run against the official v3.4.2 source failed multiple hunks, so the workflow skips that patch instead of silently continuing with rejects.
 
 ---
 
 ## 2. Stealth & Hook Coexistence Architecture
 
-To achieve comprehensive root hiding while maintaining stability and compatibility, the build integrates both SUSFS and NoMount:
+The SukiSU-Ultra flavor integrates SUSFS and NoMount. NoMount is a separate option shared by the build pipeline; KernelSU-Next does not run the SukiSU-specific in-tree SUSFS patch.
 
 ```mermaid
 flowchart TD
-    A[Stealth Stack Integration] --> B[SUSFS v2.3.0]
+    A[SukiSU-Ultra Stealth Stack] --> B[SUSFS v2.3.0]
     A --> C[NoMount Metamodule]
     B --> D[Path Redirection: CONFIG_KSU_SUSFS_OPEN_REDIRECT=y]
     B --> E[Kernel Hiding: kstat, uname, mounts, symbols]
@@ -31,13 +34,13 @@ flowchart TD
 ```
 
 ### Key Stealth Components:
-1. **SUSFS v2.3.0** (`simonpunk/susfs4ksu`):
+1. **SUSFS v2.3.0 (SukiSU-Ultra only)** (`simonpunk/susfs4ksu`):
    * Target branch: `gki-android16-6.12`
    * Provides suspicious path hiding, fake mount IDs (`mnt_id`), kstat spoofing, `uname` spoofing, and symbol hiding from `/proc/kallsyms`.
 2. **NoMount VFS Hooks** (`maxsteeel/nomount`):
    * Injects low-level VFS mounting stealth hooks directly into kernel filesystem structures.
-3. **Unconditional Open Redirect**:
-   * `CONFIG_KSU_SUSFS_OPEN_REDIRECT=y` is always enabled, ensuring path redirection works seamlessly alongside NoMount.
+3. **SukiSU Open Redirect**:
+   * `CONFIG_KSU_SUSFS_OPEN_REDIRECT=y` is enabled only for SukiSU-Ultra builds; KernelSU-Next does not receive this Suki-specific configuration.
 
 ---
 
@@ -47,7 +50,7 @@ Android 16 GKI kernels are built with Google's modern Clang toolchain under stri
 
 * **`selinux_hide.c` Pointer-Bool Conversion**:
   Modern Clang flags `if (security_dump_masked_av_fn)` as `-Wpointer-bool-conversion` or `-Wtautological-pointer-compare` when turned into an extern function by SUSFS.
-  The build workflow automatically scans and patches `selinux_hide.c` across all root flavors to use proper `&func != NULL` or `func != NULL` pointer comparisons.
+  The SukiSU-Ultra workflow step scans and patches `selinux_hide.c` to use proper `&func != NULL` or `func != NULL` pointer comparisons; the SukiSU-specific patch step is skipped for KernelSU-Next.
 * **Module Versioning Bypass**:
   The Bazel vendor module versioning bypass (`bad_version: return 1;` in `common/kernel/module/version.c`) is baked in automatically by default, producing a single flashable `Image` compatible with Xiaomi HyperOS 3 and other strict OEM ROMs.
 
@@ -138,9 +141,9 @@ flowchart TD
 
 Every completed build workflow produces structured release and testing assets:
 
-1. **`*-Bundle.zip`**: All-in-one release bundle containing `AnyKernel3.zip`, matching SukiSU-Ultra Manager `APK`, NetHunter driver module, and NoMount metamodule.
+1. **`*-Bundle.zip`**: All-in-one release bundle containing `AnyKernel3.zip`, the matching SukiSU-Ultra or KernelSU-Next Manager `APK`, NetHunter driver module, and NoMount metamodule.
 2. **`AnyKernel3.zip`**: Flashable kernel installer containing the bypassed kernel `Image`.
-3. **`Nethunter-Wireless-Modules.zip`**: Flashable SukiSU-Ultra module for external USB WiFi dongles, firmware, BadUSB, and WebUI manager.
+3. **`Nethunter-Wireless-Modules.zip`**: Flashable module for external USB WiFi dongles, firmware, BadUSB, and WebUI manager.
 4. **`NoMount-Metamodule.zip`**: Standalone NoMount companion module matching the kernel's exact commit SHA.
-5. **`*-Manager.apk`**: Matching SukiSU-Ultra Root Manager APK automatically fetched during build.
+5. **`*-Manager.apk`**: Matching SukiSU-Ultra or non-spoofed KernelSU-Next Manager APK automatically fetched during build.
 6. **`Build-Summary.md`**: Detailed provenance metadata containing compiler strings, KSU tag, commit SHAs, and active feature flags.

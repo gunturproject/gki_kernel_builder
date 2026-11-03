@@ -6,7 +6,7 @@ from pathlib import Path
 
 PLACEHOLDERS = {
     "{{ROOT_IMPL}}": lambda: os.environ.get("ROOT_IMPL", "SukiSU-Ultra"),
-    "{{ROOT_MANAGER_NAME}}": lambda: os.environ.get("ROOT_MANAGER_NAME", "SukiSU-Ultra Manager"),
+    "{{ROOT_MANAGER_NAME}}": lambda: os.environ.get("ROOT_MANAGER_NAME", "Root Manager"),
     "{{KSU_VERSION}}": lambda: os.environ.get("KSU_VERSION", "unknown"),
     "{{KSU_GIT_TAG}}": lambda: os.environ.get("KSU_GIT_TAG", "no-tag"),
     "{{KSUN_BRANCH}}": lambda: os.environ.get("KSUN_BRANCH", "main"),

@@ -2,7 +2,7 @@
 
 ## 📌 Project Overview & Architecture
 * **Project Name:** `gki_kernel_builder`
-* **Target Kernel:** Android 16 GKI (`6.12.30-android16`, Sublevel `30`, OS Patch Level `2025-07`)
+* **Target Kernels:** Android 16 GKI `6.12.30` (2025-07) and `6.12.38` (2025-09, Google r39 source pin). `6.12.30` is device-tested; `6.12.38` is available as a build target but not claimed device-tested.
 * **Primary Build Platform:** **GitHub Actions CI/CD** &mdash; *Notice: The developer's local environment/device does NOT have local compilation toolchains (no Bazel, Clang, or AOSP cross-compilers). All kernel compilation, toolchains, and module packaging are strictly orchestrated in the cloud via GitHub Actions workflows.*
 * **Primary Tested Device:** Redmi Note 14 4G (`tanzanite`) on Xiaomi HyperOS 3 (Android 16).
 
@@ -23,25 +23,30 @@
 
 ## 🛠️ Comprehensive Feature Implementations
 
-### 1. Root Implementation: SukiSU-Ultra Exclusively
-The project exclusively uses **SukiSU-Ultra** as its kernel root implementation (KernelSU-Next and ReSukiSU removed; no selection menu required):
+### 1. Root Implementations
+The build workflow offers **SukiSU-Ultra** and **KernelSU-Next** as selectable kernel root implementations and automatically bundles the matching official manager APK.
 * **SukiSU-Ultra (`ultra` / `sukisu-ultra`):**
-  * Cloned from upstream `SukiSU-Ultra` main branch.
-  * Native SUSFS v2.3.0 compatibility and symbol linkage.
-  * Kernel-level root solution & KPM engine.
-  * Direct manager APK fetching via `fetch-root-managers`.
+  * Verified pin is `sukisu_ultra.main`; upstream branch is `main`.
+  * Uses the builder's tested in-tree SUSFS v2.3.0 patch and symbol-linkage fixes.
+  * Kernel-level root solution with KPM engine.
+* **KernelSU-Next (`kernelsu-next`):**
+  * Verified default is official release tag `v3.4.2`; `latest`/`update` use upstream `dev`.
+  * Kconfig requires `CONFIG_KPROBES` and `CONFIG_EXT4_FS`; the root setup action enables both along with `CONFIG_KSU`.
+  * Fetches the matching non-spoofed official Manager APK via `fetch-root-managers`.
+  * Do not run the SukiSU-specific in-tree SUSFS patch on this source: its hunks fail dry-run against v3.4.2. The workflow must disclose that limitation.
 
 ### 2. Stealth & Root Hiding Stack
-* **SUSFS v2.3.0:**
-  * In-tree kernel patches applied to `fs/`, `kernel/`, and `security/` for kernel-level mount isolation, process masking, and symbol hiding. Pinned to latest verified commit `7d91da2d2ce056d1abf378d9199aaf1072d37ab0`.
-  * **Unconditional Open Redirect:** `CONFIG_KSU_SUSFS_OPEN_REDIRECT=y` is always enabled, ensuring path redirection works seamlessly alongside NoMount.
+* **SUSFS v2.3.0 (SukiSU-Ultra flavor only):**
+  * In-tree kernel patches apply to `fs/`, `kernel/`, and `security/` for mount isolation, process masking, and symbol hiding. The workflow pins the verified SUSFS source commit.
+  * **Open Redirect:** `CONFIG_KSU_SUSFS_OPEN_REDIRECT=y` is enabled only when the SukiSU-compatible SUSFS action runs; it is not applied to KernelSU-Next.
 * **NoMount VFS Redirection Metamodule:**
   * Pinned to audited commit `d0f57d5c` with SHA-based pre-fetching to withstand upstream `dev` branch rewinds.
   * Auto-cloned and compiled with Zig compiler in GitHub Actions to produce architecture-native **`ko-loader-arm64`** and **`ko-loader-arm`** binaries inside `bin/`.
 
 ### 3. Automated Root Manager App Fetching
 * **`fetch-root-managers` Action & `managers.yml` Workflow:**
-  * Automatically fetches the official SukiSU-Ultra manager APK during the kernel build or via standalone dispatch workflow.
+  * Fetches the official manager APK matching the selected root flavor during the kernel build or via standalone dispatch.
+  * For KernelSU-Next, select the non-spoofed APK from the latest official release.
   * Uploads the manager APK artifact directly alongside build releases.
 
 ### 4. Kali NetHunter & Penetration Testing Stack
@@ -168,7 +173,8 @@ The project exclusively uses **SukiSU-Ultra** as its kernel root implementation 
    * Keep `AGENTS.md` continuously updated with all chat decisions, completed milestones, technical fixes, and workflow structural changes.
 6. **Workflow & Repository Architecture Constraints:**
    * **Primary Build Workflow:** `.github/workflows/build-kernel.yml` (direct build with vendor bypass and artifact packaging).
-   * **Root Implementation:** Exclusively **SukiSU-Ultra** (no menu selection required; KernelSU-Next and ReSukiSU fully removed).
+   * **Root Implementation:** Selectable **SukiSU-Ultra** or **KernelSU-Next**; do not claim in-tree SukiSU SUSFS integration on KernelSU-Next.
+   * **Kernel Targets:** Android 16 GKI `6.12.30` (2025-07) and `6.12.38` (2025-09); the 6.12.38 source is pinned to Google tag `android16-6.12-2025-09_r39` / commit `4ef93a700ec424fe0d4f7d133e7ba50e4dbf0e36`.
    * **Commit Modes:** `verified` (audited pins in `commits.json`), `latest` (branch tips), and `update` (builds latest then auto-promotes pins on success).
    * **Feature Toggles:** Granular boolean checkboxes for `NoMount`, `Baseband Guard`, `Networking`, `DroidSpaces`, `NTSync`, `Ptrace Patch`, `Unicode Fix`, `BPF Stack`, `Performance`, `Kali NetHunter`, `CIFS`, and `Cache`.
    * **Vendor Module Bypass:** Built-in by default as a single bypassed kernel image (`Image`) without requiring a separate bypass checkbox.

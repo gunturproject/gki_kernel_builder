@@ -3,9 +3,9 @@
 # GKI Kernel Builder
 
 [![Android](https://img.shields.io/badge/Android-16-blue)](https://android.googlesource.com/)
-[![Linux](https://img.shields.io/badge/Kernel-6.12.30-red)](https://kernel.org/)
+[![Linux](https://img.shields.io/badge/Kernel-6.12.30%20%7C%206.12.38-red)](https://kernel.org/)
 
-A feature-packed GKI kernel for Android 16 (`6.12.30-android16`, 2025-07).
+A feature-packed Android 16 GKI builder supporting `6.12.30` (2025-07) and `6.12.38` (2025-09, official upstream r39 source pin).
 
 </div>
 
@@ -19,7 +19,7 @@ Flashing custom kernels carries risks. I am not responsible for bricked devices 
 
 ## ✨ Features
 
-- 🔐 **Root Stack**: **SukiSU-Ultra** with native SUSFS root hiding, KPM support, and automated manager APK bundling.
+- 🔐 **Root Stack**: Select **SukiSU-Ultra** or **KernelSU-Next** in the build workflow; the matching official Manager APK is bundled automatically. The SukiSU-specific in-tree SUSFS patch is not applied to KernelSU-Next.
 - 🛡️ **SUSFS & NoMount**: Built-in SUSFS root hiding and NoMount stealth VFS support.
 - 🐉 **Kali NetHunter**: Monitor mode, frame injection, BadUSB HID keyboard/mouse (`/dev/hidg1`, `/dev/hidg2`), USB Wi-Fi dongles, SDR, CAN bus, and Bluetooth RFCOMM.
 - 📱 **Kernel Manager WebUI**: Streamlined Material 3 dashboard to control TCP congestion (CUBIC stock default / BBR3 / Westwood+), driver modules, RAM/MGLRU, and real-time activity log.
@@ -89,8 +89,9 @@ Included in `Nethunter-Wireless-Modules.zip`. Open it via the **WebUI** button i
 
 - **Device**: **Redmi Note 14 4G (`tanzanite`)** / MediaTek Helio G99 (MT6789) family — fully working.
 - **OS / ROM**: Xiaomi HyperOS (Android 16).
-- **Target Kernel**: Android 16 GKI (`6.12.30-android16`).
-- **Stability**: Tested and verified with **SUSFS + NoMount + NetHunter** running together with full cellular and internal Wi-Fi functionality.
+- **Device-tested target**: Android 16 GKI `6.12.30-android16`.
+- **Additional build target**: `6.12.38-android16` (2025-09); this target is available in the workflow but is not claimed as device-tested here.
+- **Stability**: The documented device test covers **SUSFS + NoMount + NetHunter** on the 6.12.30 SukiSU-Ultra build.
 
 ---
 
@@ -107,13 +108,13 @@ Included in `Nethunter-Wireless-Modules.zip`. Open it via the **WebUI** button i
 2. **Flash Kernel & Root**:
    - Download the release bundle (`*-Bundle.zip`) and extract it.
    - Flash `*-AnyKernel3.zip` via **Kernel Flasher** or custom recovery.
-   - Install the matching root manager APK (`SukiSU_*.apk`).
+   - Install the matching root manager APK included in the bundle (SukiSU-Ultra or KernelSU-Next).
    - Reboot device.
-   - *(Optional)* Flash **[susfs4ksu-module](https://github.com/sidex15/susfs4ksu-module/releases)** in your root manager for root hiding.
+   - *(Optional, SukiSU-Ultra builds only)* Flash **[susfs4ksu-module](https://github.com/sidex15/susfs4ksu-module/releases)** in your root manager for additional root hiding. The builder does not apply this SukiSU-specific in-tree patch to KernelSU-Next.
 
 3. **Modules (Optional)**:
    - **NetHunter**: Flash `Nethunter-Wireless-Modules.zip` in your root manager for USB Wi-Fi/SDR drivers and the WebUI manager.
-   - **NoMount**: Flash `NoMount-6.12.30-android16-*.zip` in your root manager for stealth VFS root hiding.
+   - **NoMount**: Flash the matching `NoMount-*.zip` in your root manager for VFS mount isolation.
    - *Note: Both modules can be flashed and used together without conflicts.*
 </details>
 
@@ -123,6 +124,7 @@ Included in `Nethunter-Wireless-Modules.zip`. Open it via the **WebUI** button i
 
 - 🏗️ **GKI KernelSU SUSFS**: Based on work by [WildKernels](https://github.com/WildKernels/GKI_KernelSU_SUSFS)
 - 🔐 **SukiSU-Ultra**: Developed by [SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra)
+- 🔐 **KernelSU-Next**: Developed by [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next)
 - 🛡️ **SUSFS**: Developed by [simonpunk](https://gitlab.com/simonpunk/susfs4ksu.git)
 - 🐉 **Kali NetHunter**: Developed by the [Offensive Security / Kali NetHunter Team](https://www.kali.org/docs/nethunter/)
 - 🪝 **NoMount**: Developed by [maxsteeel](https://github.com/maxsteeel/nomount)

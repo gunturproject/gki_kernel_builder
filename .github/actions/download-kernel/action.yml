@@ -18,6 +18,14 @@ inputs:
     description: 'OS patch level (e.g., 2025-07)'
     required: false
     default: '2025-07'
+  common_revision:
+    description: 'Optional immutable kernel/common commit SHA'
+    required: false
+    default: ''
+  common_upstream:
+    description: 'Upstream tag/ref used to fetch the pinned kernel/common SHA'
+    required: false
+    default: ''
 
 outputs:
   deprecated_branch:
@@ -77,6 +85,19 @@ runs:
                 fi
               fi
             fi
+          fi
+
+          if [ -n "${{ inputs.common_revision }}" ]; then
+            COMMON_REVISION="${{ inputs.common_revision }}"
+            COMMON_UPSTREAM="${{ inputs.common_upstream }}"
+            if [ -z "$COMMON_UPSTREAM" ]; then
+              echo "ERROR: common_upstream is required when common_revision is set" >&2
+              return 1
+            fi
+            python3 "${{ github.workspace }}/.github/scripts/patch_manifest.py" \
+              "$DEFAULT_MANIFEST_PATH" "$COMMON_REVISION" "$COMMON_UPSTREAM"
+            TAG_FALLBACK="$COMMON_UPSTREAM"
+            echo "Pinned kernel/common to $COMMON_REVISION via $COMMON_UPSTREAM"
           fi
 
           echo "deprecated=$DEPRECATED" >> $GITHUB_OUTPUT
